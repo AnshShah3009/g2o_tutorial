@@ -3,6 +3,10 @@ from sys import argv, exit
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 import copy
+import os
+
+
+np.random.seed(42)
 
 
 def getVertices():
@@ -47,7 +51,8 @@ def getCloud(cube, color):
 def getFrames():
 	# posei = ( x, y, z, thetaZ(deg) )
 
-	poses = [[-8, 8, 0, -60], [-10, 4, 0, -30], [-12, 0, 0, 0], [-10, -4, 0, 30], [-8, -8, 0, 60]]
+	# poses = [[-8, 8, 0, -60], [-10, 4, 0, -30], [-12, 0, 0, 0], [-10, -4, 0, 30], [-8, -8, 0, 60]]
+	poses = [[-12, 0, 0, 0], [-10, -4, 0, 30], [-8, -8, 0, 60], [-4, -12, 0, 75], [0, -16, 0, 80]]
 
 	frames = []
 
@@ -75,14 +80,23 @@ def getLocalCubes(points, poses):
 	
 	points = np.array(points)
 	poses = np.array(poses)
-	
+
 	nPoses, nPoints, pointDim = poses.shape[0], points.shape[0], points.shape[1]
 	cubes = np.zeros((nPoses, nPoints, pointDim))
 
-	for i in range(nPoses):
-		cube = points - poses[i, 0:3]
+	for i, pose in enumerate(poses):
+		cube = []
 
-		cubes[i] = cube
+		T = np.identity(4)
+		T[0, 3], T[1, 3], T[2, 3] = pose[0], pose[1], pose[2]
+		T[0:3, 0:3] = R.from_euler('z', pose[3], degrees=True).as_dcm()
+
+		for pt in np.hstack((points, np.ones((points.shape[0], 1)))):
+			ptLocal = np.linalg.inv(T) @ pt.reshape(4, 1)
+
+			cube.append(ptLocal.squeeze(1)[0:3])
+
+		cubes[i] = np.asarray(cube)
 
 	return cubes
 
@@ -132,8 +146,6 @@ def registerCubes(trans, cubes):
 	cloud4 = [ele.transform(T1_2 @ T2_3 @ T3_4) for ele in cloud4]
 	cloud5 = [ele.transform(T1_2 @ T2_3 @ T3_4 @ T4_5) for ele in cloud5]
 
-	# o3d.visualization.draw_geometries(cloud2)
-
 	geometries = cloud1 + cloud2 + cloud3 + cloud4 + cloud5
 
 	o3d.visualization.draw_geometries(geometries)
@@ -173,8 +185,150 @@ def icpTransformations(cubes):
 	return trans
 
 
+def writeRobotPose(trans, g2o):
+	# Tw_1: 1 wrt w
+
+	start = [-12, 0, 0, 0]
+
+	Tw_1 = np.identity(4)
+	Tw_1[0, 3], Tw_1[1, 3], Tw_1[2, 3] = start[0], start[1], start[2]
+	Tw_1[0:3, 0:3] = R.from_euler('z', start[3], degrees=True).as_dcm()
+
+	T1_2, T2_3, T3_4, T4_5 = trans[0], trans[1], trans[2], trans[3]
+
+	Tw_2 = Tw_1 @ T1_2
+	Tw_3 = Tw_2 @ T2_3
+	Tw_4 = Tw_3 @ T3_4
+	Tw_5 = Tw_4 @ T4_5
+
+	pose1 = [Tw_1[0, 3], Tw_1[1, 3], Tw_1[2, 3]] + list(R.from_dcm(Tw_1[0:3, 0:3]).as_quat())
+	pose2 = [Tw_2[0, 3], Tw_2[1, 3], Tw_2[2, 3]] + list(R.from_dcm(Tw_2[0:3, 0:3]).as_quat())
+	pose3 = [Tw_3[0, 3], Tw_3[1, 3], Tw_3[2, 3]] + list(R.from_dcm(Tw_3[0:3, 0:3]).as_quat())
+	pose4 = [Tw_4[0, 3], Tw_4[1, 3], Tw_4[2, 3]] + list(R.from_dcm(Tw_4[0:3, 0:3]).as_quat())
+	pose5 = [Tw_5[0, 3], Tw_5[1, 3], Tw_5[2, 3]] + list(R.from_dcm(Tw_5[0:3, 0:3]).as_quat())
+
+	posesRobot = [pose1, pose2, pose3, pose4, pose5]
+
+	sp = ' '
+
+	for i, (x, y, z, qx, qy, qz, qw) in enumerate(posesRobot):
+		line = "VERTEX_SE3:QUAT " + str(i+1) + sp + str(x) + sp + str(y) + sp + str(z) + sp + str(qx) + sp + str(qy) + sp + str(qz) + sp + str(qw) + '\n'
+		g2o.write(line)
+
+	
+def writeOdom(trans, g2o):	
+	sp = ' '
+	info = '20 0 0 0 0 0 20 0 0 0 0 20 0 0 0 20 0 0 20 0 20'
+
+	for i, T in enumerate(trans):
+		dx, dy, dz = T[0, 3], T[1, 3], T[2, 3]
+
+		qx, qy, qz, qw = list(R.from_dcm(T[0:3, 0:3]).as_quat())
+		
+		line = "EDGE_SE3:QUAT " + str(i+1) + sp + str(i+2) + sp + str(dx) + sp + str(dy) + sp + str(dz) + sp + str(qx) + sp + str(qy) + sp + str(qz) + sp + str(qw) + sp +  info + '\n'
+
+		g2o.write(line)
+
+
+def writeCubeVertices(cubes, g2o):
+	cube1 = cubes[0]
+
+	start = [-12, 0, 0, 0]
+
+	Tw_1 = np.identity(4)
+	Tw_1[0, 3], Tw_1[1, 3], Tw_1[2, 3] = start[0], start[1], start[2]
+	Tw_1[0:3, 0:3] = R.from_euler('z', start[3], degrees=True).as_dcm()
+
+	cube = []
+
+	for pt in np.hstack((cube1, np.ones((cube1.shape[0], 1)))):
+		ptWorld = Tw_1 @ pt.reshape(4, 1)
+
+		cube.append(ptWorld.squeeze(1)[0:3])
+
+	quat = "0 0 0 1\n"
+	sp = ' '
+
+	for i, (x, y, z) in enumerate(cube):
+		line = "VERTEX_SE3:QUAT " + str(i+6) + sp + str(x) + sp + str(y) + sp + str(z) + sp + quat
+		
+		g2o.write(line)
+
+
+def writeLandmarkEdge(cubes, g2o):
+	quat = "0 0 0 1"
+	sp = ' '
+	info = '40 0 0 0 0 0 40 0 0 0 0 40 0 0 0 0.000001 0 0 0.000001 0 0.000001' 
+
+	for i, cube in enumerate(cubes):
+		for j, (x, y, z) in enumerate(cube):
+			line  = "EDGE_SE3:QUAT " + str(i+1) + sp + str(j+6) + sp + str(x) + sp + str(y) + sp + str(z) + sp + quat + sp +  info + '\n'
+
+			g2o.write(line)
+
+
 def writeG2o(trans, cubes):
-	pass
+	g2o = open("noise.g2o", 'w')
+
+	g2o.write('# Robot poses\n\n')
+
+	writeRobotPose(trans, g2o)
+
+	g2o.write("\n # Cube vertices\n\n")
+
+	writeCubeVertices(cubes, g2o)
+
+	g2o.write('\n# Odometry edges\n\n')
+
+	writeOdom(trans, g2o)
+
+	g2o.write('\n# Landmark edges\n\n')
+
+	writeLandmarkEdge(cubes, g2o)
+
+	g2o.write("\nFIX 1\n")
+
+	g2o.close()
+
+
+def optimize():
+	cmd = "g2o -robustKernel Cauchy -robustKernelWidth 1 -o {} -i 50 {} > /dev/null 2>&1".format(
+		"opt.g2o", "noise.g2o")
+	os.system(cmd)
+
+
+def readG2o(fileName):
+	f = open(fileName, 'r')
+	A = f.readlines()
+	f.close()
+
+	poses = []
+
+	for line in A:
+		if "VERTEX_SE3:QUAT" in line:
+			(ver, ind, x, y, z, qx, qy, qz, qw, newline) = line.split(' ')
+
+			if int(ind) <= 5:
+				T = np.identity(4)
+				T[0, 3], T[1, 3], T[2, 3] = x, y, z
+				T[0:3, 0:3] = R.from_quat([qx, qy, qz, qw]).as_dcm()
+
+				poses.append(T)
+
+	poses = np.asarray(poses)
+
+	return poses
+
+
+def getRelativeEdge(poses):
+	T1_2 = np.linalg.inv(poses[0]) @ poses[1]
+	T2_3 = np.linalg.inv(poses[1]) @ poses[2]
+	T3_4 = np.linalg.inv(poses[2]) @ poses[3]
+	T4_5 = np.linalg.inv(poses[3]) @ poses[4]
+
+	trans = np.array([T1_2, T2_3, T3_4, T4_5])
+
+	return trans
 
 
 if __name__ == '__main__':
@@ -184,11 +338,18 @@ if __name__ == '__main__':
 	visualizeData(vertices, frames)
 
 	gtCubes = getLocalCubes(points, poses)
-	noisyCubesHigh = addNoiseCubes(gtCubes, noise=0.4)
+	noisyCubesHigh = addNoiseCubes(gtCubes, noise=1.8)
 	noisyCubesLow = addNoiseCubes(gtCubes, noise=0.15)
 
 	trans = icpTransformations(noisyCubesHigh)
 
 	registerCubes(trans, noisyCubesLow)
 
-	# writeG2o(trans, cubes)
+	writeG2o(trans, noisyCubesLow)
+
+	optimize()
+
+	optPoses = readG2o("opt.g2o")
+	optEdges = getRelativeEdge(optPoses)
+
+	registerCubes(optEdges, noisyCubesLow)
