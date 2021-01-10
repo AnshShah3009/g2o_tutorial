@@ -7,13 +7,10 @@ from scipy.spatial.transform import Rotation as R
 np.random.seed(42)
 
 
-def getVertices():
+def getVertices(points):
     """
     Generating Cube vertices
     """
-    points = [[0, 8, 8], [0, 0, 8], [0, 0, 0], [0, 8, 0],
-              [8, 8, 8], [8, 0, 8], [8, 0, 0], [8, 8, 0]]
-
     vertices = []
 
     for ele in points:
@@ -32,15 +29,11 @@ def getVertices():
     return vertices, points
 
 
-def getFrames():
+def getFrames(poses):
     """
     Generating Robot positions
     """
     # posei = ( x, y, z, thetaZ(deg) )
-
-    poses = [[-12, 0, 0, 0], [-10, -4, 0, 30],
-             [-8, -8, 0, 60], [-4, -12, 0, 75], [0, -16, 0, 80]]
-
     frames = []
 
     for pose in poses:
@@ -179,21 +172,33 @@ def getCloud(cube, color):
     return vertices
 
 
-def writeRobotPose(trans, g2o):
-    # Tw_1: 1 wrt w
+def add_noise(arr, noise):
+    noiseMat = arr + np.random.normal(0, noise, arr.shape)
+    return noiseMat
 
-    start = [-12, 0, 0, 0]
+
+def writeRobotPose(poses, GPI, g2o):
+    poses = add_noise(poses, GPI)
 
     Tw_1 = np.identity(4)
-    Tw_1[0, 3], Tw_1[1, 3], Tw_1[2, 3] = start[0], start[1], start[2]
-    Tw_1[0:3, 0:3] = R.from_euler('z', start[3], degrees=True).as_matrix()
+    Tw_1[0, 3], Tw_1[1, 3], Tw_1[2, 3] = poses[0][0], poses[0][1], poses[0][2]
+    Tw_1[0:3, 0:3] = R.from_euler('z', poses[0][3], degrees=True).as_matrix()
 
-    T1_2, T2_3, T3_4, T4_5 = trans[0], trans[1], trans[2], trans[3]
+    Tw_2 = np.identity(4)
+    Tw_2[0, 3], Tw_2[1, 3], Tw_2[2, 3] = poses[1][0], poses[1][1], poses[1][2]
+    Tw_2[0:3, 0:3] = R.from_euler('z', poses[1][3], degrees=True).as_matrix()
 
-    Tw_2 = Tw_1 @ T1_2
-    Tw_3 = Tw_2 @ T2_3
-    Tw_4 = Tw_3 @ T3_4
-    Tw_5 = Tw_4 @ T4_5
+    Tw_3 = np.identity(4)
+    Tw_3[0, 3], Tw_3[1, 3], Tw_3[2, 3] = poses[2][0], poses[2][1], poses[2][2]
+    Tw_3[0:3, 0:3] = R.from_euler('z', poses[2][3], degrees=True).as_matrix()
+
+    Tw_4 = np.identity(4)
+    Tw_4[0, 3], Tw_4[1, 3], Tw_4[2, 3] = poses[3][0], poses[3][1], poses[3][2]
+    Tw_4[0:3, 0:3] = R.from_euler('z', poses[3][3], degrees=True).as_matrix()
+
+    Tw_5 = np.identity(4)
+    Tw_5[0, 3], Tw_5[1, 3], Tw_5[2, 3] = poses[4][0], poses[4][1], poses[4][2]
+    Tw_5[0:3, 0:3] = R.from_euler('z', poses[4][3], degrees=True).as_matrix()
 
     pose1 = [Tw_1[0, 3], Tw_1[1, 3], Tw_1[2, 3]] + \
         list(R.from_dcm(Tw_1[0:3, 0:3]).as_quat())
@@ -212,7 +217,7 @@ def writeRobotPose(trans, g2o):
 
     for i, (x, y, z, qx, qy, qz, qw) in enumerate(posesRobot):
         line = "VERTEX_SE3:QUAT " + str(i+1) + sp + str(x) + sp + str(y) + sp + str(
-            z) + sp + str(qx) + sp + str(qy) + sp + str(qz) + sp + str(qw) + '\n'
+            z) + sp + str(qx) + sp + str(qy) + sp + str(qz) + sp + str(qw) + ' \n'
         g2o.write(line)
 
 
@@ -231,28 +236,16 @@ def writeOdom(trans, g2o):
         g2o.write(line)
 
 
-def writeCubeVertices(cubes, g2o):
-    cube1 = cubes[0]
+def writeCubeVertices(points, GLI, g2o):
+    points = add_noise(points, GLI)
 
-    start = [-12, 0, 0, 0]
-
-    Tw_1 = np.identity(4)
-    Tw_1[0, 3], Tw_1[1, 3], Tw_1[2, 3] = start[0], start[1], start[2]
-    Tw_1[0:3, 0:3] = R.from_euler('z', start[3], degrees=True).as_matrix()
-
-    cube = []
-
-    for pt in np.hstack((cube1, np.ones((cube1.shape[0], 1)))):
-        ptWorld = Tw_1 @ pt.reshape(4, 1)
-
-        cube.append(ptWorld.squeeze(1)[0:3])
-
-    quat = "0 0 0 1\n"
+    quat = "0 0 0 1 \n"
     sp = ' '
 
-    for i, (x, y, z) in enumerate(cube):
+    for i, (x, y, z) in enumerate(points):
         line = "VERTEX_SE3:QUAT " + \
-            str(i+6) + sp + str(x) + sp + str(y) + sp + str(z) + sp + quat
+            str(i+6) + sp + str(x) + sp + str(y) + \
+            sp + str(z) + sp + quat
 
         g2o.write(line)
 
@@ -270,16 +263,16 @@ def writeLandmarkEdge(cubes, g2o):
             g2o.write(line)
 
 
-def writeG2o(trans, cubes):
+def writeG2o(poses, points, trans, cubes, GPI, GLI):
     g2o = open("noise.g2o", 'w')
 
     g2o.write('# Robot poses\n\n')
 
-    writeRobotPose(trans, g2o)
+    writeRobotPose(poses, GPI, g2o)
 
     g2o.write("\n # Cube vertices\n\n")
 
-    writeCubeVertices(cubes, g2o)
+    writeCubeVertices(points, GLI, g2o)
 
     g2o.write('\n# Odometry edges\n\n')
 
@@ -300,6 +293,8 @@ def readG2o(fileName):
     f.close()
 
     poses = []
+    poses_coord = []
+    landmarks = []
 
     for line in A:
         if "VERTEX_SE3:QUAT" in line:
@@ -311,10 +306,16 @@ def readG2o(fileName):
                 T[0:3, 0:3] = R.from_quat([qx, qy, qz, qw]).as_matrix()
 
                 poses.append(T)
+                poses_coord.append(np.array([x, y, z]))
+
+            if int(ind) > 5:
+                landmarks.append(np.array([x, y, z]))
 
     poses = np.asarray(poses)
+    landmarks = np.asarray(landmarks, dtype=np.float)
+    poses_coord = np.asarray(poses_coord, dtype=np.float)
 
-    return poses
+    return poses, poses_coord, landmarks
 
 
 def getRelativeEdge(poses):
