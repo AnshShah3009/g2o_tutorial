@@ -1,5 +1,6 @@
 import os
 import util
+import argparse
 import numpy as np
 import open3d as o3d
 import matplotlib.pyplot as plt
@@ -7,13 +8,6 @@ from mpl_toolkits import mplot3d
 
 
 np.random.seed(42)
-
-# HIGH_NOISE = 2.0
-# LOW_NOISE = 0.2
-GPI = 0
-RPO = 0
-GLI = 0
-RLO = 0
 
 
 def visualizeData(vertices, frames):
@@ -46,6 +40,13 @@ def plot(gt, init, opt, title):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-GPI', type=float, required=True)
+    parser.add_argument('-RPO', type=float, required=True)
+    parser.add_argument('-GLI', type=float, required=True)
+    parser.add_argument('-RLO', type=float, required=True)
+    args = parser.parse_args()
+
     # Generating Cube vertices
     points = [[0, 8, 8], [0, 0, 8], [0, 0, 0], [0, 8, 0],
               [8, 8, 8], [8, 0, 8], [8, 0, 0], [8, 8, 0]]
@@ -59,25 +60,25 @@ if __name__ == "__main__":
     poses = np.asarray(poses)
 
     # Visualizing Ground Truth robot positions and cube vertices
-    # visualizeData(vertices, frames)
+    visualizeData(vertices, frames)
 
     gtCubes = util.getLocalCubes(points, poses)
-    noisyCubes = util.add_noise(gtCubes, RLO)
+    noisyCubes = util.add_noise(gtCubes, args.RLO)
 
     # Registering two point clouds using transformation obtained using ICP.
     trans = util.icpTransformations(noisyCubes)
-    trans = util.add_noise(trans, RPO)
+    trans = util.add_noise(trans, args.RPO)
 
     # util.registerCubes(trans, noisyCubes)
 
-    util.writeG2o(poses, points, trans, noisyCubes, GPI, GLI)
+    util.writeG2o(poses, points, trans, noisyCubes, args.GPI, args.GLI)
     optimize()
 
     _, initPoses_coord, initLandmarks = util.readG2o("noise.g2o")
     optPoses, optPoses_coord, optLandmarks = util.readG2o("opt.g2o")
 
     optEdges = util.getRelativeEdge(optPoses)
-    # util.registerCubes(optEdges, noisyCubes)
+    util.registerCubes(optEdges, noisyCubes)
 
     # plotting gt, initial and optimised landmarks
     plot(points, initLandmarks, optLandmarks, "Landmarks")
