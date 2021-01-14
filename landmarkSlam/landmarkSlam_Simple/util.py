@@ -3,6 +3,7 @@ from operator import pos
 import numpy as np
 import open3d as o3d
 from scipy.spatial.transform import Rotation as R
+import math
 
 np.random.seed(42)
 
@@ -364,3 +365,26 @@ def getRelativeEdge(poses):
         trans.append(tr)
 
     return np.array(trans)
+
+
+def fibonacciSphere(samples, scale=1):
+    '''
+    Generates points on a sphere that 'look' uniform to the
+    human eye.
+    '''
+    # from https://stackoverflow.com/questions/9600801/evenly-distributing-n-points-on-a-sphere
+    points = []
+    phi = math.pi * (3. - math.sqrt(5.))  # golden angle in radians
+
+    for i in range(samples):
+        y = 1 - (i / float(samples - 1)) * 2  # y goes from 1 to -1
+        radius = math.sqrt(1 - y * y)  # radius at y
+
+        theta = phi * i  # golden angle increment
+
+        x = math.cos(theta) * radius
+        z = math.sin(theta) * radius
+
+        points.append([x * scale, y * scale, z * scale])
+
+    return points
