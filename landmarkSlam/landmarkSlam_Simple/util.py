@@ -1,11 +1,86 @@
 import copy
+from operator import pos
 import numpy as np
 import open3d as o3d
-from sys import argv, exit
 from scipy.spatial.transform import Rotation as R
 
 np.random.seed(42)
 
+
+def getColors(n):
+    if (n > 67):
+        raise ValueError(f'n must be atmost 67, instead got {n}')
+
+    colors = [
+        (1, 100, 211),
+        (174, 212, 46),
+        (100, 52, 183),
+        (85, 188, 47),
+        (190, 97, 233),
+        (1, 197, 87),
+        (226, 89, 219),
+        (0, 153, 32),
+        (232, 42, 163),
+        (107, 221, 136),
+        (248, 44, 151),
+        (0, 117, 48),
+        (177, 124, 255),
+        (222, 164, 0),
+        (122, 126, 255),
+        (252, 147, 20),
+        (70, 68, 175),
+        (168, 147, 0),
+        (117, 48, 164),
+        (177, 209, 131),
+        (179, 0, 135),
+        (1, 219, 210),
+        (232, 11, 80),
+        (13, 217, 245),
+        (255, 122, 39),
+        (0, 96, 179),
+        (208, 92, 0),
+        (3, 184, 242),
+        (163, 46, 0),
+        (133, 160, 255),
+        (188, 102, 0),
+        (235, 135, 255),
+        (59, 92, 26),
+        (255, 98, 193),
+        (1, 147, 107),
+        (210, 0, 107),
+        (127, 216, 174),
+        (255, 71, 89),
+        (1, 98, 150),
+        (255, 135, 71),
+        (149, 181, 255),
+        (128, 111, 0),
+        (254, 161, 255),
+        (236, 192, 99),
+        (121, 55, 134),
+        (210, 200, 126),
+        (155, 20, 106),
+        (255, 157, 100),
+        (76, 75, 142),
+        (130, 66, 0),
+        (212, 187, 252),
+        (164, 19, 40),
+        (76, 117, 165),
+        (145, 52, 27),
+        (249, 172, 245),
+        (128, 64, 53),
+        (255, 141, 215),
+        (255, 153, 127),
+        (134, 50, 111),
+        (240, 167, 158),
+        (146, 44, 84),
+        (180, 145, 195),
+        (255, 103, 163),
+        (129, 72, 105),
+        (255, 159, 165),
+        (255, 165, 200),
+        (0, 0, 0),
+    ]
+    return np.array(colors[n], dtype=np.float64) / 255
 
 def getVertices(points):
     """
@@ -79,39 +154,28 @@ def getLocalCubes(points, poses):
 def icpTransformations(cubes):
     # T1_2 : 2 wrt 1
 
-    P1 = cubes[0]
-    P2 = cubes[1]
-    P3 = cubes[2]
-    P4 = cubes[3]
-    P5 = cubes[4]
+    if cubes.shape[0] < 2:
+        raise ValueError('Need at least 2 observations to register.')
 
-    pcd1, pcd2, pcd3, pcd4, pcd5 = (o3d.geometry.PointCloud(), o3d.geometry.PointCloud(),
-                                    o3d.geometry.PointCloud(), o3d.geometry.PointCloud(), o3d.geometry.PointCloud())
+    pcds = []
+    for i in range(cubes.shape[0]):
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(cubes[i])
+        pcds.append(pcd)
 
-    pcd1.points = o3d.utility.Vector3dVector(P1)
-    pcd2.points = o3d.utility.Vector3dVector(P2)
-    pcd3.points = o3d.utility.Vector3dVector(P3)
-    pcd4.points = o3d.utility.Vector3dVector(P4)
-    pcd5.points = o3d.utility.Vector3dVector(P5)
+    corres = np.arange(cubes.shape[1]) # correspondences, no of points * 2 (because pairwise)
+    corres = np.vstack((corres, corres)).T
+    corres = o3d.utility.Vector2iVector(corres)
 
-    corr = np.array([(i, i) for i in range(8)])
+    p2p = o3d.pipelines.registration.TransformationEstimationPointToPoint()
 
-    p2p = o3d.registration.TransformationEstimationPointToPoint()
+    transforms = []
+    for i in range(cubes.shape[0] - 1): # for every consecutive pair of observations
+        tr = p2p.compute_transformation(pcds[i + 1], pcds[i], corres)
+        transforms.append(tr)
 
-    T1_2 = p2p.compute_transformation(
-        pcd2, pcd1, o3d.utility.Vector2iVector(corr))
-    T2_3 = p2p.compute_transformation(
-        pcd3, pcd2, o3d.utility.Vector2iVector(corr))
-    T3_4 = p2p.compute_transformation(
-        pcd4, pcd3, o3d.utility.Vector2iVector(corr))
-    T4_5 = p2p.compute_transformation(
-        pcd5, pcd4, o3d.utility.Vector2iVector(corr))
-
-    draw_registration_result(pcd2, pcd1, T1_2)
-
-    trans = np.array([T1_2, T2_3, T3_4, T4_5])
-
-    return trans
+    draw_registration_result(pcds[1], pcds[0], transforms[0])
+    return np.array(transforms)
 
 
 def draw_registration_result(source, target, transformation):
@@ -133,25 +197,20 @@ def draw_registration_result(source, target, transformation):
 def registerCubes(trans, cubes):
     # Registering noisy cubes in first frame
 
-    cloud1 = getCloud(cubes[0], [0.9, 0.2, 0])
-    cloud2 = getCloud(cubes[1], [0, 0.2, 0.9])
-    cloud3 = getCloud(cubes[2], [0.2, 0.9, 0])
-    cloud4 = getCloud(cubes[3], [0.5, 0, 0.95])
-    cloud5 = getCloud(cubes[4], [0.9, 0.45, 0])
+    pcds = []
+    for i in range(cubes.shape[0]):
+        pcd = getCloud(cubes[i], getColors(i))
+        pcds.append(pcd)
 
-    T1_2 = trans[0]
-    T2_3 = trans[1]
-    T3_4 = trans[2]
-    T4_5 = trans[3]
-
-    cloud2 = [ele.transform(T1_2) for ele in cloud2]
-    cloud3 = [ele.transform(T1_2 @ T2_3) for ele in cloud3]
-    cloud4 = [ele.transform(T1_2 @ T2_3 @ T3_4) for ele in cloud4]
-    cloud5 = [ele.transform(T1_2 @ T2_3 @ T3_4 @ T4_5) for ele in cloud5]
-
-    geometries = cloud1 + cloud2 + cloud3 + cloud4 + cloud5
-
-    o3d.visualization.draw_geometries(geometries)
+    pcdsTransformed = []
+    for i, pcd in enumerate(pcds):
+        tr = np.eye(4)
+        for j in range(i):
+            tr = tr @ trans[j]
+        pcdsTransformed.append([
+            ele.transform(tr) for ele in pcd
+        ])
+    o3d.visualization.draw_geometries([mesh for pcd in pcdsTransformed for mesh in pcd])
 
 
 def getCloud(cube, color):
@@ -180,38 +239,18 @@ def add_noise(arr, noise):
 def writeRobotPose(poses, GPI, g2o):
     poses = add_noise(poses, GPI)
 
-    Tw_1 = np.identity(4)
-    Tw_1[0, 3], Tw_1[1, 3], Tw_1[2, 3] = poses[0][0], poses[0][1], poses[0][2]
-    Tw_1[0:3, 0:3] = R.from_euler('z', poses[0][3], degrees=True).as_matrix()
+    fromWorld = []
+    for pose in poses:
+        Tw = np.eye(4)
+        Tw[0, 3], Tw[1, 3], Tw[2, 3] = pose[0], pose[1], pose[2]
+        Tw[0:3, 0:3] = R.from_euler('z', pose[3], degrees=True).as_matrix()
+        fromWorld.append(Tw)
 
-    Tw_2 = np.identity(4)
-    Tw_2[0, 3], Tw_2[1, 3], Tw_2[2, 3] = poses[1][0], poses[1][1], poses[1][2]
-    Tw_2[0:3, 0:3] = R.from_euler('z', poses[1][3], degrees=True).as_matrix()
-
-    Tw_3 = np.identity(4)
-    Tw_3[0, 3], Tw_3[1, 3], Tw_3[2, 3] = poses[2][0], poses[2][1], poses[2][2]
-    Tw_3[0:3, 0:3] = R.from_euler('z', poses[2][3], degrees=True).as_matrix()
-
-    Tw_4 = np.identity(4)
-    Tw_4[0, 3], Tw_4[1, 3], Tw_4[2, 3] = poses[3][0], poses[3][1], poses[3][2]
-    Tw_4[0:3, 0:3] = R.from_euler('z', poses[3][3], degrees=True).as_matrix()
-
-    Tw_5 = np.identity(4)
-    Tw_5[0, 3], Tw_5[1, 3], Tw_5[2, 3] = poses[4][0], poses[4][1], poses[4][2]
-    Tw_5[0:3, 0:3] = R.from_euler('z', poses[4][3], degrees=True).as_matrix()
-
-    pose1 = [Tw_1[0, 3], Tw_1[1, 3], Tw_1[2, 3]] + \
-        list(R.from_dcm(Tw_1[0:3, 0:3]).as_quat())
-    pose2 = [Tw_2[0, 3], Tw_2[1, 3], Tw_2[2, 3]] + \
-        list(R.from_dcm(Tw_2[0:3, 0:3]).as_quat())
-    pose3 = [Tw_3[0, 3], Tw_3[1, 3], Tw_3[2, 3]] + \
-        list(R.from_dcm(Tw_3[0:3, 0:3]).as_quat())
-    pose4 = [Tw_4[0, 3], Tw_4[1, 3], Tw_4[2, 3]] + \
-        list(R.from_dcm(Tw_4[0:3, 0:3]).as_quat())
-    pose5 = [Tw_5[0, 3], Tw_5[1, 3], Tw_5[2, 3]] + \
-        list(R.from_dcm(Tw_5[0:3, 0:3]).as_quat())
-
-    posesRobot = [pose1, pose2, pose3, pose4, pose5]
+    posesRobot = []
+    for Tw in fromWorld:
+        pose = [Tw[0, 3], Tw[1, 3], Tw[2, 3]] + \
+            list(R.from_dcm(Tw[0:3, 0:3]).as_quat())
+        posesRobot.append(pose)
 
     sp = ' '
 
@@ -287,7 +326,7 @@ def writeG2o(poses, points, trans, cubes, GPI, GLI):
     g2o.close()
 
 
-def readG2o(fileName):
+def readG2o(fileName, num_poses):
     f = open(fileName, 'r')
     A = f.readlines()
     f.close()
@@ -300,7 +339,7 @@ def readG2o(fileName):
         if "VERTEX_SE3:QUAT" in line:
             (ver, ind, x, y, z, qx, qy, qz, qw, newline) = line.split(' ')
 
-            if int(ind) <= 5:
+            if int(ind) <= num_poses:
                 T = np.identity(4)
                 T[0, 3], T[1, 3], T[2, 3] = x, y, z
                 T[0:3, 0:3] = R.from_quat([qx, qy, qz, qw]).as_matrix()
@@ -308,7 +347,7 @@ def readG2o(fileName):
                 poses.append(T)
                 poses_coord.append(np.array([x, y, z]))
 
-            if int(ind) > 5:
+            else:
                 landmarks.append(np.array([x, y, z]))
 
     poses = np.asarray(poses)
@@ -319,11 +358,9 @@ def readG2o(fileName):
 
 
 def getRelativeEdge(poses):
-    T1_2 = np.linalg.inv(poses[0]) @ poses[1]
-    T2_3 = np.linalg.inv(poses[1]) @ poses[2]
-    T3_4 = np.linalg.inv(poses[2]) @ poses[3]
-    T4_5 = np.linalg.inv(poses[3]) @ poses[4]
+    trans = []
+    for i in range(poses.shape[0] - 1):
+        tr = np.linalg.inv(poses[i]) @ poses[i+1]
+        trans.append(tr)
 
-    trans = np.array([T1_2, T2_3, T3_4, T4_5])
-
-    return trans
+    return np.array(trans)

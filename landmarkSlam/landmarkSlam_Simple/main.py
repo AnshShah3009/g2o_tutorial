@@ -49,7 +49,10 @@ if __name__ == "__main__":
 
     # Generating Cube vertices
     points = [[0, 8, 8], [0, 0, 8], [0, 0, 0], [0, 8, 0],
-              [8, 8, 8], [8, 0, 8], [8, 0, 0], [8, 8, 0]]
+              [8, 8, 8], [8, 0, 8], [8, 0, 0], [8, 8, 0],
+              [4, 0, 0], [0, 0, 4], [4, 0, 8], [8, 0, 4],
+              [4, 8, 0], [0, 8, 4], [4, 8, 8], [8, 8, 4],
+              [0 ,4, 0], [8, 4, 0], [8, 4, 8], [0, 4, 8],]
     vertices, points = util.getVertices(points)
     points = np.asarray(points)
 
@@ -74,14 +77,13 @@ if __name__ == "__main__":
     util.writeG2o(poses, points, trans, noisyCubes, args.GPI, args.GLI)
     optimize()
 
-    _, initPoses_coord, initLandmarks = util.readG2o("noise.g2o")
-    optPoses, optPoses_coord, optLandmarks = util.readG2o("opt.g2o")
+    _, initPoses_coord, initLandmarks = util.readG2o("noise.g2o", poses.shape[0])
+    optPoses, optPoses_coord, optLandmarks = util.readG2o("opt.g2o", poses.shape[0])
 
     optEdges = util.getRelativeEdge(optPoses)
     util.registerCubes(optEdges, noisyCubes)
 
     # plotting gt, initial and optimised landmarks
     plot(points, initLandmarks, optLandmarks, "Landmarks")
-
     # plotting gt, initial and optimised robot poses
     plot(poses, initPoses_coord, optPoses_coord, "Robot Poses")
