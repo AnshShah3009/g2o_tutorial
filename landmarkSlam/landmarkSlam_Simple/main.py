@@ -88,3 +88,8 @@ if __name__ == "__main__":
     plot(points, initLandmarks, optLandmarks, "Landmarks")
     # plotting gt, initial and optimised robot poses
     plot(poses, initPoses_coord, optPoses_coord, "Robot Poses")
+
+    landmarkError = np.mean(np.linalg.norm(initLandmarks - optLandmarks, axis=1) ** 2)
+    poseError = np.mean(np.linalg.norm(initPoses_coord - optPoses_coord, axis=1) ** 2)
+    print('MSE in LANDMARKS:', landmarkError)
+    print('MSE in POSES:', poseError)
