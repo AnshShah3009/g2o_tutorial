@@ -14,7 +14,8 @@ def getTheta(X ,Y):
 				THETA[i] = 3*math.pi/2
 			continue
 
-		THETA[i] = math.atan((Y[i+1]-Y[i-1])/(X[i+1]-X[i-1]))
+                # TODO MISTAKE: THIS SHOUD BE i instead of i + 1
+		THETA[i] = math.atan2((Y[i+1]-Y[i-1]),(X[i+1]-X[i-1]))
 
 		if(X[i+1]-X[i-1] < 0):
 			THETA[i] += math.pi 
@@ -211,7 +212,7 @@ def addNoise(X, Y, THETA):
 		if(i<5):
 			xNoise = 0; yNoise = 0; tNoise = 0
 		else:
-			xNoise = np.random.normal(0, 0.03); yNoise = np.random.normal(0, 0.03); tNoise = np.random.normal(0, 0.03)
+			xNoise = np.random.normal(0, 0.1); yNoise = np.random.normal(0, 0.1); tNoise = np.random.normal(0, 0.1)
 		del_xN = del_x + xNoise; del_yN = del_y + yNoise; del_thetaN = del_theta + tNoise
 
 		# Convert to T2_1'
@@ -278,7 +279,7 @@ def readG2o(fileName):
 
 	for line in A:
 		if "VERTEX_SE2" in line:
-			(ver, ind, x, y, theta) = line.split(' ')
+			(ver, ind, x, y, theta) = line.split()
 			X.append(float(x))
 			Y.append(float(y))
 			THETA.append(float(theta.rstrip('\n')))
